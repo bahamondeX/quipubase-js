@@ -27,11 +27,11 @@ export class Quipubase extends OpenAI {
 		const {
 			baseURL = "https://quipubase.oscarbahamonde.com/v1",
 			apiKey = "[DEFAULT]",
-			timeout = 86400,
+			timeout = 86400
 		} = options;
 
 		// Initialize OpenAI parent class
-		super({ baseURL, apiKey, timeout });
+		super({ baseURL, apiKey, timeout, dangerouslyAllowBrowser: true });
 
 		// Initialize and configure a separate Axios client for requests
 		this.axiosClient = axios.create({
