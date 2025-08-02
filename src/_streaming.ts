@@ -1,44 +1,87 @@
-import type { AxiosInstance, Method } from "axios";
-import { createInterface } from "readline";
+// sseStream.ts
+import type { AxiosInstance, Method } from 'axios'
 
-/**
- * A generic async generator to handle Server-Sent Events (SSE) from an Axios stream.
- * It reads the stream line-by-line, parses "data: ..." events, and yields the JSON-parsed data.
- *
- * @param client The Axios instance.
- * @param method The HTTP method.
- * @param url The endpoint URL.
- * @param params Optional URL query parameters.
- * @returns An async generator that yields parsed data chunks of type T.
- */
 export async function* sseStream<T>(
-	client: AxiosInstance,
-	method: Method,
-	url: string,
+	clientOrUrl: AxiosInstance | string,
+	method: Method = 'GET',
+	url?: string,
 	params?: any
 ): AsyncGenerator<T> {
+	const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined'
+
+	if (isBrowser) {
+		const eventSource = new EventSource(typeof clientOrUrl === 'string' ? clientOrUrl : url!)
+		const queue: T[] = []
+		let done = false
+		let resume: ((value: T) => void) | null = null
+
+		eventSource.onmessage = (event) => {
+			try {
+				const data = JSON.parse(event.data)
+				if (resume) {
+					resume(data as T)
+					resume = null
+				} else {
+					queue.push(data as T)
+				}
+			} catch (err) {
+				console.error('Failed to parse SSE:', event.data, err)
+			}
+		}
+
+		eventSource.onerror = (err) => {
+			console.error('SSE error:', err)
+			done = true
+			eventSource.close()
+		}
+
+		while (!done) {
+			if (queue.length > 0) {
+				yield queue.shift()!
+			} else {
+				yield await new Promise<T>((res) => (resume = res))
+			}
+		}
+
+		return
+	}
+
+	// Node.js: use Axios stream + readline
+	const { createInterface } = await import('readline')
+	const client = clientOrUrl as AxiosInstance
+
 	const response = await client({
 		method,
-		url,
+		url: url!,
 		params,
-		responseType: "stream",
-	});
+		responseType: 'stream',
+		headers: {
+			Accept: 'text/event-stream'
+		}
+	})
 
 	const rl = createInterface({
 		input: response.data,
-		crlfDelay: Infinity,
-	});
+		crlfDelay: Infinity
+	})
+
+	let dataBuffer = ''
 
 	for await (const line of rl) {
-		if (line.startsWith("data: ")) {
-			const data = line.substring(6).trim();
-			if (data) {
+		if (line.trim() === '') {
+			if (dataBuffer) {
 				try {
-					yield JSON.parse(data) as T;
-				} catch (e) {
-					console.error("Failed to parse SSE data chunk:", data, e);
+					yield JSON.parse(dataBuffer) as T
+				} catch (err) {
+					console.error('Failed to parse chunk:', dataBuffer, err)
 				}
+				dataBuffer = ''
 			}
+			continue
+		}
+
+		if (line.startsWith('data:')) {
+			dataBuffer += line.slice(5).trim()
 		}
 	}
 }
