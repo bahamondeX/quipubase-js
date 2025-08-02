@@ -4,6 +4,14 @@ Welcome to the official TypeScript client for the **Quipubase API**. This client
 
 ---
 
+![Quipubase Logo](logo.png)
+
+API Docs
+
+[Quipubase API Docs](https://quipubase.oscarbahamonde.com/docs)
+
+---
+
 ## 📦 Installation
 
 Use npm or yarn to install the client:
