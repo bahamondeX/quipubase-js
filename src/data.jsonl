@@ -1,0 +1,608 @@
+{"type":"file","content":"import { z } from \"zod\";
+import type { AxiosInstance } from \"axios\";
+import { sseStream } from \"./_streaming\";
+
+// --- Zod Schemas for Objects API ---
+
+export const QuipuActionsSchema = z.enum([
+	\"create\",
+	\"read\",
+	\"update\",
+	\"delete\",
+	\"query\",
+	\"stop\",
+]);
+
+export const SubResponseSchema = z.object({
+	event: QuipuActionsSchema,
+	data: z.union([z.record(z.string(), z.any()), z.array(z.record(z.string(), z.any()))]),
+});
+
+export const PubResponseSchema = z.object({
+	collection: z.string(),
+	data: z.union([z.record(z.string(), z.any()), z.array(z.record(z.string(), z.any()))]),
+	event: QuipuActionsSchema,
+});
+
+export const QuipubaseRequestSchema = z.object({
+	event: QuipuActionsSchema,
+	id: z.string().optional(),
+	data: z.record(z.string(), z.any()).optional(),
+});
+
+// --- Derived TypeScript Types ---
+
+export type QuipuActions = z.infer<typeof QuipuActionsSchema>;
+export type SubResponse = z.infer<typeof SubResponseSchema>;
+export type PubResponse = z.infer<typeof PubResponseSchema>;
+export type QuipubaseRequest = z.infer<typeof QuipubaseRequestSchema>;
+
+// --- Objects Client Class ---
+
+export class Objects {
+	private client: AxiosInstance;
+
+	constructor(client: AxiosInstance) {
+		this.client = client;
+	}
+
+	async *sub(args: {
+		collection_id: string;
+	}): AsyncGenerator<SubResponse> {
+		yield* sseStream<SubResponse>(
+			this.client,
+			\"GET\",
+			`/collections/objects/${args.collection_id}`,
+			{ stream: true }
+		);
+	}
+
+	async pub(
+		args: { collection_id: string } & QuipubaseRequest
+	): Promise<PubResponse> {
+		const { collection_id, ...body } = args;
+		const response = await this.client.post(
+			`/collections/objects/${collection_id}`,
+			body
+		);
+		return PubResponseSchema.parse(response.data);
+	}
+}","path":"./objects.ts"}
+{"type":"file","content":"","path":"./data.jsonl"}
+{"type":"file","content":"import { z } from \"zod\";
+import type { AxiosInstance } from \"axios\";
+import { sseStream } from \"./_streaming\";
+import FormData from \"form-data\";
+
+// Type Aliases for file content
+export type FileContent = Buffer | Blob | string;
+
+// --- Zod Schemas for Blobs API ---
+
+export const ChunkFileSchema = z.object({
+	chunks: z.array(z.string()),
+	created: z.number(),
+	chunkedCount: z.number(),
+});
+
+export const FileTypeSchema = z.object({
+	url: z.string(),
+	path: z.string(),
+});
+
+export const GetOrCreateFileSchema = z.object({
+	data: FileTypeSchema,
+	created: z.number(),
+});
+
+export const DeleteFileSchema = z.object({
+	deleted: z.boolean(),
+});
+
+// Recursive schema for file tree
+const baseTreeNodeSchema = z.object({
+	type: z.enum([\"file\", \"folder\"]),
+	name: z.string(),
+	path: z.string(),
+});
+
+type TreeNode = z.infer<typeof baseTreeNodeSchema> & {
+	content: string | TreeNode[];
+};
+
+export const TreeNodeSchema: z.ZodType<TreeNode> = baseTreeNodeSchema.extend({
+	content: z.lazy(() => z.union([z.string(), z.array(TreeNodeSchema)])),
+});
+
+
+// --- Derived TypeScript Types ---
+
+export type ChunkFile = z.infer<typeof ChunkFileSchema>;
+export type FileType = z.infer<typeof FileTypeSchema>;
+export type GetOrCreateFile = z.infer<typeof GetOrCreateFileSchema>;
+export type DeleteFile = z.infer<typeof DeleteFileSchema>;
+
+// --- Blobs Client Class ---
+
+export class Blobs {
+	private client: AxiosInstance;
+
+	constructor(client: AxiosInstance) {
+		this.client = client;
+	}
+
+	async chunk(args: {
+		file: FileContent;
+		format: \"html\" | \"text\";
+	}): Promise<ChunkFile> {
+		const form = new FormData();
+		form.append(\"file\", args.file);
+		const response = await this.client.post(\"/blob\", form, {
+			params: { format: args.format },
+			headers: form.getHeaders(),
+		});
+		return ChunkFileSchema.parse(response.data);
+	}
+
+	async create(args: {
+		path: string;
+		file: FileContent;
+		bucket?: string;
+	}): Promise<GetOrCreateFile> {
+		const form = new FormData();
+		form.append(\"file\", args.file);
+		const response = await this.client.put(`/blob/${args.path}`, form, {
+			params: { bucket: args.bucket ?? \"quipu-store\" },
+			headers: form.getHeaders(),
+		});
+		return GetOrCreateFileSchema.parse(response.data);
+	}
+
+	async delete(args: {
+		path: string;
+		bucket?: string;
+	}): Promise<DeleteFile> {
+		const response = await this.client.delete(`/blob/${args.path}`, {
+			params: { bucket: args.bucket ?? \"quipu-store\" },
+		});
+		return DeleteFileSchema.parse(response.data);
+	}
+
+	async retrieve(args: {
+		path: string;
+		bucket?: string;
+	}): Promise<GetOrCreateFile> {
+		const response = await this.client.get(`/blob/${args.path}`, {
+			params: { bucket: args.bucket ?? \"quipu-store\" },
+		});
+		return GetOrCreateFileSchema.parse(response.data);
+	}
+
+	async *list(args: {
+		path: string;
+		bucket?: string;
+	}): AsyncGenerator<FileType> {
+		yield* sseStream<FileType>(
+			this.client,
+			\"GET\",
+			`/blobs/${args.path}`,
+			{ bucket: args.bucket ?? \"quipu-store\" }
+		);
+	}
+}","path":"./blobs.ts"}
+{"type":"file","content":"import { z } from \"zod\";
+import type { AxiosInstance } from \"axios\";
+
+// --- Zod Schemas for Collections API ---
+
+export const CollectionModelSchema = z.object({
+	id: z.string(),
+	sha: z.string(),
+	json_schema: z.union([z.string(), z.record(z.string(), z.any())]),
+	created_at: z.string().datetime(),
+	updated_at: z.string().datetime(),
+});
+
+export const CollectionDeleteModelSchema = z.object({
+	code: z.number(),
+});
+
+// --- Derived TypeScript Types ---
+
+export type CollectionModel = z.infer<typeof CollectionModelSchema>;
+export type CollectionDeleteModel = z.infer<
+	typeof CollectionDeleteModelSchema
+>;
+
+// --- Collections Client Class ---
+
+export class Collections {
+	private client: AxiosInstance;
+
+	constructor(client: AxiosInstance) {
+		this.client = client;
+	}
+
+	async create(args: {
+		json_schema: Record<string, any>;
+	}): Promise<CollectionModel> {
+		const response = await this.client.post(\"/collections\", args.json_schema);
+		return CollectionModelSchema.parse(response.data);
+	}
+
+	async retrieve(args: { collection_id: string }): Promise<CollectionModel> {
+		const response = await this.client.get(`/collections/${args.collection_id}`);
+		return CollectionModelSchema.parse(response.data);
+	}
+
+	async delete(args: {
+		collection_id: string;
+	}): Promise<CollectionDeleteModel> {
+		const response = await this.client.delete(
+			`/collections/${args.collection_id}`
+		);
+		return CollectionDeleteModelSchema.parse(response.data);
+	}
+
+	async list(): Promise<CollectionModel[]> {
+		const response = await this.client.get(\"/collections\");
+		return z.array(CollectionModelSchema).parse(response.data);
+	}
+}","path":"./collections.ts"}
+{"type":"file","content":"import type { AxiosInstance, Method } from \"axios\";
+import { createInterface } from \"readline\";
+
+/**
+ * A generic async generator to handle Server-Sent Events (SSE) from an Axios stream.
+ * It reads the stream line-by-line, parses \"data: ...\" events, and yields the JSON-parsed data.
+ *
+ * @param client The Axios instance.
+ * @param method The HTTP method.
+ * @param url The endpoint URL.
+ * @param params Optional URL query parameters.
+ * @returns An async generator that yields parsed data chunks of type T.
+ */
+export async function* sseStream<T>(
+	client: AxiosInstance,
+	method: Method,
+	url: string,
+	params?: any
+): AsyncGenerator<T> {
+	const response = await client({
+		method,
+		url,
+		params,
+		responseType: \"stream\",
+	});
+
+	const rl = createInterface({
+		input: response.data,
+		crlfDelay: Infinity,
+	});
+
+	for await (const line of rl) {
+		if (line.startsWith(\"data: \")) {
+			const data = line.substring(6).trim();
+			if (data) {
+				try {
+					yield JSON.parse(data) as T;
+				} catch (e) {
+					console.error(\"Failed to parse SSE data chunk:\", data, e);
+				}
+			}
+		}
+	}
+}","path":"./_streaming.ts"}
+{"type":"file","content":"import OpenAI from \"openai\";
+import axios, { type AxiosInstance } from \"axios\";
+import { Blobs } from \"./blobs\";
+import { Collections } from \"./collections\";
+import { Objects } from \"./objects\";
+import { Query } from \"./query\";
+import { Vectors } from \"./vector\";
+
+// Re-export all schemas and types for easy access
+export * from \"./blobs\";
+export * from \"./collections\";
+export * from \"./objects\";
+export * from \"./query\";
+export * from \"./vector\";
+
+
+export interface QuipubaseOptions {
+	baseURL?: string;
+	apiKey?: string;
+	timeout?: number;
+}
+
+export class Quipubase extends OpenAI {
+	private axiosClient: AxiosInstance;
+
+	constructor(options: QuipubaseOptions = {}) {
+		const {
+			baseURL = \"https://quipubase.oscarbahamonde.com/v1\",
+			apiKey = \"[DEFAULT]\",
+			timeout = 86400,
+		} = options;
+
+		// Initialize OpenAI parent class
+		super({ baseURL, apiKey, timeout });
+
+		// Initialize and configure a separate Axios client for requests
+		this.axiosClient = axios.create({
+			baseURL,
+			timeout,
+			headers: {
+				\"Content-Type\": \"application/json\",
+				Authorization: `Bearer ${apiKey}`,
+			},
+			// Axios needs to handle array params correctly for the vector delete endpoint
+			paramsSerializer: params => {
+				const usp = new URLSearchParams();
+				for (const key in params) {
+					const value = params[key];
+					if (Array.isArray(value)) {
+						value.forEach(v => usp.append(key, v));
+					} else {
+						usp.append(key, value);
+					}
+				}
+				return usp.toString();
+			}
+		});
+	}
+
+	/**
+	 * Access the Collections endpoint.
+	 */
+	get collections(): Collections {
+		return new Collections(this.axiosClient);
+	}
+
+	/**
+	 * Access the Objects endpoint for real-time data manipulation.
+	 */
+	get objects(): Objects {
+		return new Objects(this.axiosClient);
+	}
+
+	/**
+	 * Access the Live Query endpoint.
+	 */
+	get query(): Query {
+		return new Query(this.axiosClient);
+	}
+
+	/**
+	 * Access the Vector embeddings endpoint.
+	 */
+	get vector(): Vectors {
+		return new Vectors(this.axiosClient);
+	}
+
+	/**
+	 * Access the Blobs endpoint for file storage.
+	 */
+	get blobs(): Blobs {
+		return new Blobs(this.axiosClient);
+	}
+}","path":"./index.ts"}
+{"type":"file","content":"import { z } from \"zod\";
+import type { AxiosInstance } from \"axios\";
+
+// --- Zod Schemas for Query API ---
+
+export const LiveQueryDatasetMetadataSchema = z.object({
+	key: z.string(),
+	bucket: z.string().optional(),
+	namespace: z.string().optional(),
+});
+
+export const LiveQueryDatasetQuerySchema = LiveQueryDatasetMetadataSchema.extend(
+	{
+		query: z.string(),
+	}
+);
+
+export const LiveQueryDatasetUpdateSchema = LiveQueryDatasetMetadataSchema.extend(
+	{
+		data: z.array(z.record(z.string(), z.any())),
+	}
+);
+
+export const AdapterSchema = z.object({
+	engine: z.enum([\"file\", \"mongodb\", \"postgresql\"]),
+	uri: z.string(),
+	query: z.string(),
+	key: z.string().optional(),
+	namespace: z.string().optional(),
+	bucket: z.string().optional(),
+});
+
+export const DatasetMetadataResponseSchema = z.object({
+	key: z.string(),
+	bucket: z.string(),
+	namespace: z.string(),
+});
+
+export const QueryLiveResponseSchema = z.object({
+	data: z.array(z.record(z.string(), z.any())),
+	json_schema: z.record(z.string(), z.any()),
+	key: z.string(),
+});
+
+export const DeleteQueryDatasetResponseSchema = z.object({
+	success: z.boolean(),
+});
+
+export const JsonSchemaModelSchema = z.record(z.string(), z.any());
+
+// --- Derived TypeScript Types ---
+
+export type LiveQueryDatasetMetadata = z.infer<typeof LiveQueryDatasetMetadataSchema>;
+export type LiveQueryDatasetQuery = z.infer<typeof LiveQueryDatasetQuerySchema>;
+export type LiveQueryDatasetUpdate = z.infer<typeof LiveQueryDatasetUpdateSchema>;
+export type Adapter = z.infer<typeof AdapterSchema>;
+export type DatasetMetadataResponse = z.infer<typeof DatasetMetadataResponseSchema>;
+export type QueryLiveResponse = z.infer<typeof QueryLiveResponseSchema>;
+export type DeleteQueryDatasetResponse = z.infer<typeof DeleteQueryDatasetResponseSchema>;
+export type JsonSchemaModel = z.infer<typeof JsonSchemaModelSchema>;
+
+// --- Query Client Class ---
+
+export class Query {
+	private client: AxiosInstance;
+
+	constructor(client: AxiosInstance) {
+		this.client = client;
+	}
+
+	async list(args?: {
+		namespace?: string;
+		bucket?: string;
+	}): Promise<DatasetMetadataResponse[]> {
+		const response = await this.client.get(\"/query/live\", {
+			params: {
+				namespace: args?.namespace ?? \"default\",
+				bucket: args?.bucket ?? \"quipu-store\",
+			},
+		});
+		return z.array(DatasetMetadataResponseSchema).parse(response.data);
+	}
+
+	async create(adapter: Adapter): Promise<QueryLiveResponse> {
+		const response = await this.client.post(\"/query/live\", adapter);
+		return QueryLiveResponseSchema.parse(response.data);
+	}
+
+	async retrieve(query: LiveQueryDatasetQuery): Promise<QueryLiveResponse> {
+		const response = await this.client.put(\"/query/live\", query);
+		return QueryLiveResponseSchema.parse(response.data);
+	}
+
+	async update(update: LiveQueryDatasetUpdate): Promise<QueryLiveResponse> {
+		const response = await this.client.patch(\"/query/live\", update);
+		return QueryLiveResponseSchema.parse(response.data);
+	}
+
+	async delete(args: {
+		key: string;
+		bucket?: string;
+		namespace?: string;
+	}): Promise<DeleteQueryDatasetResponse> {
+		const response = await this.client.delete(\"/query/live\", {
+			params: {
+				key: args.key,
+				bucket: args.bucket ?? \"quipu-store\",
+				namespace: args.namespace ?? \"default\",
+			},
+		});
+		return DeleteQueryDatasetResponseSchema.parse(response.data);
+	}
+
+	async describe(metadata: LiveQueryDatasetMetadata): Promise<JsonSchemaModel> {
+		const response = await this.client.post(\"/query/schema\", metadata);
+		return JsonSchemaModelSchema.parse(response.data);
+	}
+}","path":"./query.ts"}
+{"type":"file","content":"import { z } from \"zod\";
+import type { AxiosInstance } from \"axios\";
+
+// --- Zod Schemas for Vector API ---
+
+export const EmbedTextSchema = z.object({
+	input: z.array(z.string()),
+	model: z.literal(\"gemini-embedding-001\"),
+});
+
+export const QueryTextSchema = z.object({
+	input: z.string(),
+	top_k: z.number().int(),
+	model: z.literal(\"gemini-embedding-001\"),
+});
+
+export const UpsertItemSchema = z.object({
+	id: z.string(),
+	content: z.string(),
+});
+
+export const EmbeddingSchema = z.object({
+	id: z.string(),
+	content: z.union([z.string(), z.array(z.string())]),
+	embedding: z.array(z.number()),
+});
+
+export const QueryItemSchema = UpsertItemSchema.extend({
+	score: z.number(),
+});
+
+export const UpsertResponseSchema = z.object({
+	count: z.number(),
+	ellapsed: z.number(),
+	data: z.array(UpsertItemSchema),
+});
+
+export const QueryResponseSchema = z.object({
+	data: z.array(QueryItemSchema),
+	count: z.number(),
+	ellapsed: z.number(),
+});
+
+export const DeleteResponseSchema = z.object({
+	data: z.array(z.string()),
+	count: z.number(),
+	ellapsed: z.number(),
+});
+
+// --- Derived TypeScript Types ---
+
+export type EmbedText = z.infer<typeof EmbedTextSchema>;
+export type QueryText = z.infer<typeof QueryTextSchema>;
+export type UpsertItem = z.infer<typeof UpsertItemSchema>;
+export type Embedding = z.infer<typeof EmbeddingSchema>;
+export type QueryItem = z.infer<typeof QueryItemSchema>;
+export type UpsertResponse = z.infer<typeof UpsertResponseSchema>;
+export type QueryResponse = z.infer<typeof QueryResponseSchema>;
+export type DeleteResponse = z.infer<typeof DeleteResponseSchema>;
+
+// --- Vectors Client Class ---
+
+export class Vectors {
+	private client: AxiosInstance;
+
+	constructor(client: AxiosInstance) {
+		this.client = client;
+	}
+
+	async list(args: { namespace: string }): Promise<string[]> {
+		const response = await this.client.get(`/vector/${args.namespace}`);
+		return z.array(z.string()).parse(response.data);
+	}
+
+	async retrieve(args: { namespace: string; id: string }): Promise<Embedding[]> {
+		const response = await this.client.get(`/vector/${args.namespace}/${args.id}`);
+		return z.array(EmbeddingSchema).parse(response.data);
+	}
+
+	async upsert(args: { namespace: string } & EmbedText): Promise<UpsertResponse> {
+		const { namespace, ...body } = args;
+		const response = await this.client.post(`/vector/${namespace}`, body);
+		return UpsertResponseSchema.parse(response.data);
+	}
+
+	async query(args: { namespace: string } & QueryText): Promise<QueryResponse> {
+		const { namespace, ...body } = args;
+		const response = await this.client.put(`/vector/${namespace}`, body);
+		return QueryResponseSchema.parse(response.data);
+	}
+
+	async delete(args: {
+		namespace: string;
+		ids: string[];
+	}): Promise<DeleteResponse> {
+		const response = await this.client.delete(`/vector/${args.namespace}`, {
+			params: { ids: args.ids },
+		});
+		return DeleteResponseSchema.parse(response.data);
+	}
+}","path":"./vector.ts"}

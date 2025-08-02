@@ -1,0 +1,37 @@
+{
+  "name": "quipubase",
+  "version": "1.0.21",
+  "description": "A TypeScript client for the Quipubase API.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "quipubase",
+    "api-client",
+    "typescript",
+    "database",
+    "vector-search",
+    "real-time"
+  ],
+  "author": "Oscar Bahamonde <oscar.bahamonde@pucp.pe>",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "openai": "^5.11.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bahamondeX/quipubase-js.git"
+  }
+}
