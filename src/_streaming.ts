@@ -10,7 +10,8 @@ export async function* sseStream<T>(
 	const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined'
 
 	if (isBrowser) {
-		const eventSource = new EventSource(typeof clientOrUrl === 'string' ? clientOrUrl : url!)
+
+		const eventSource = new EventSource(typeof clientOrUrl === 'string' ? `https://quipubase.oscarbahamonde.com/v1${clientOrUrl}` : `https://quipubase.oscarbahamonde.com/v1${url}`!)
 		const queue: T[] = []
 		let done = false
 		let resume: ((value: T) => void) | null = null

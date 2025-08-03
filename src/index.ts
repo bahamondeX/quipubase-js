@@ -5,6 +5,7 @@ import { Collections } from "./collections";
 import { Objects } from "./objects";
 import { Query } from "./query";
 import { Vectors } from "./vector";
+import { BaseModel } from "./orm";
 
 // Re-export all schemas and types for easy access
 export * from "./blobs";
@@ -12,6 +13,7 @@ export * from "./collections";
 export * from "./objects";
 export * from "./query";
 export * from "./vector";
+export * from "./orm";
 
 
 export interface QuipubaseOptions {
@@ -20,7 +22,7 @@ export interface QuipubaseOptions {
 	timeout?: number;
 }
 
-export class Quipubase extends OpenAI {
+class Quipubase extends OpenAI {
 	private axiosClient: AxiosInstance;
 
 	constructor(options: QuipubaseOptions = {}) {
@@ -92,3 +94,6 @@ export class Quipubase extends OpenAI {
 		return new Blobs(this.axiosClient);
 	}
 }
+
+export default Quipubase;
+export { BaseModel };
